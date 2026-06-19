@@ -1001,8 +1001,34 @@ function onCellKeydown(e){
     e.preventDefault();
     el.blur(); // fires change if value changed; finishes editing
   } else if(el.matches('textarea.cell')){
-    if(e.metaKey||e.ctrlKey){e.preventDefault();el.blur();}
-    // otherwise allow the newline
+    if(e.metaKey||e.ctrlKey){e.preventDefault();el.blur();return;}
+    // Bullet auto-continue (only for the note fields)
+    if(['progress','next','help'].includes(el.dataset.f)){
+      const val=el.value, pos=el.selectionStart;
+      // current line = text from the last newline before the cursor up to the cursor
+      const lineStart=val.lastIndexOf('\n',pos-1)+1;
+      const line=val.slice(lineStart,pos);
+      const m=line.match(/^- (.*)$/);
+      if(m){
+        e.preventDefault();
+        if(m[1].trim()===''){
+          // empty bullet → end the list: remove the "- " on this line, just break
+          const newVal=val.slice(0,lineStart)+val.slice(pos);
+          el.value=newVal;
+          const np=lineStart;
+          el.selectionStart=el.selectionEnd=np;
+        } else {
+          // continue the list with a new "- " bullet
+          const insert='\n- ';
+          el.value=val.slice(0,pos)+insert+val.slice(pos);
+          const np=pos+insert.length;
+          el.selectionStart=el.selectionEnd=np;
+        }
+        // resize the expanded row's textarea + fire input so it saves
+        el.dispatchEvent(new Event('input',{bubbles:true}));
+      }
+      // if not a bullet line, fall through and allow the normal newline
+    }
   }
 }
 
@@ -1125,7 +1151,12 @@ function visible(){
     if(F.q){const q=F.q.toLowerCase();const h=[o.id,o.account,o.project,o.owner,o.status,o.progress,o.next,o.help].join(' ').toLowerCase();if(!h.includes(q))return false;}
     return true;
   });
-  if(sortF)r=r.slice().sort((a,b)=>{const ka=sk(a,sortF),kb=sk(b,sortF);let c=typeof ka==='number'&&typeof kb==='number'?ka-kb:String(ka).localeCompare(String(kb));return sortD==='desc'?-c:c;});
+  if(sortF)r=r.slice().sort((a,b)=>{
+    // newly-added rows always stay at the top, excluded from the sort
+    if(a._isNew&&!b._isNew)return -1;
+    if(b._isNew&&!a._isNew)return 1;
+    const ka=sk(a,sortF),kb=sk(b,sortF);let c=typeof ka==='number'&&typeof kb==='number'?ka-kb:String(ka).localeCompare(String(kb));return sortD==='desc'?-c:c;
+  });
   return r;
 }
 
@@ -1372,8 +1403,10 @@ function clearSelection(){selectedIds.clear();renderRows();updateBulkBar();}
 function nextId(){let m=0;S.opps.forEach(o=>{const x=/(\d+)$/.exec(o.id);if(x)m=Math.max(m,+x[1]);});return'OPP-'+String(m+1).padStart(3,'0');}
 function addOpp(){
   goView('opps');
+  pushUndo();
   const today=new Date().toISOString().slice(0,10);
-  S.opps.push({id:nextId(),owner:'',account:'',partner_type:'',project:'',priority:'',confidence:'',status:'',month:'',year:'',progress:'',next:'',help:'',lwp:'',lwn:'',lwh:'',created_on:today,stage_updated_on:today});
+  // add new opportunity at the TOP of the list, flagged so it stays pinned above any active sort
+  S.opps.unshift({id:nextId(),owner:'',account:'',partner_type:'',project:'',priority:'',confidence:'',status:'',month:'',year:'',progress:'',next:'',help:'',lwp:'',lwn:'',lwh:'',created_on:today,stage_updated_on:today,_isNew:true});
   saveOpps();renderRows();
 }
 function doDelete(id){
